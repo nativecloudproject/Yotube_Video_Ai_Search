@@ -194,18 +194,28 @@ h1 { font-size: 20px; font-weight: 600; margin: 0 0 16px }
   .tb-search { margin: 0 12px }
   .vrow.big .vthumb { width: 200px; flex-basis: 200px }
 }
-/* 좋아요 페이지의 'AI 맞춤 추천' 영역 */
-.ai-panel { background: linear-gradient(135deg, #1f2a44 0%, #212121 60%); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; margin: 4px 0 28px; max-width: 760px }
-.ai-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px }
-.ai-sub { margin: 4px 0 16px; color: var(--text-2); font-size: 13px }
-.ai-form { display: flex; flex-direction: row; align-items: center; gap: 10px; margin-bottom: 14px }
-.ai-form input { flex: 1; min-width: 0; height: 42px; padding: 0 18px; border-radius: 21px; border: 1px solid var(--line); background: var(--bg); color: var(--text); outline: none }
-.ai-form input:focus { border-color: var(--blue) }
-.ai-form .btn { flex: none; white-space: nowrap; height: 42px; padding: 0 22px; border-radius: 21px }
-.ai-chips { display: flex; flex-wrap: wrap; gap: 10px }
-.ai-chips .chip { height: 36px; padding: 0 14px; border-radius: 18px; display: inline-flex; align-items: center; gap: 6px }
-.ai-chips .chip.zero { opacity: .5 }
-.chip-n { font-size: 12px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: rgba(255,255,255,.15); display: inline-flex; align-items: center; justify-content: center }
-.chip.on .chip-n { background: rgba(0,0,0,.15) }
-.ai-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px }
-.ai-tag { font-size: 12px; color: var(--blue); background: rgba(62,166,255,.12); padding: 2px 8px; border-radius: 10px }
+/* 좋아요 스마트 검색 */
+.liked-search-panel { background: linear-gradient(135deg, #1f2a44 0%, var(--bg-2) 60%); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; margin: 4px 0 24px; max-width: 760px }
+.liked-search-description { margin: 0 0 16px; color: var(--text-2); font-size: 13px }
+.liked-search-form { display: flex; align-items: center; gap: 10px }
+.liked-search-form input { flex: 1; min-width: 0; height: 42px; padding: 0 18px; border-radius: 21px; border: 1px solid var(--line); background: var(--bg); color: var(--text); outline: none }
+.liked-search-form input:focus { border-color: var(--blue) }
+.liked-search-form .btn { flex: none; height: 42px; padding: 0 20px; white-space: nowrap }
+.clear-search, .retry-search { border: 1px solid var(--line) }
+.example-queries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px }
+.example-queries .chip { border-radius: 16px }
+.library-status { min-height: 56px }
+.search-result-count { font-size: 16px; margin: 8px 0 18px }
+.search-error { max-width: 520px; background: rgba(255, 0, 0, .12); border: 1px solid rgba(255, 0, 0, .4); border-radius: 10px; color: #ffb4b4; padding: 14px }
+.search-error p { margin: 0 0 10px }
+.search-evidence { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; font-size: 12px }
+.similarity { color: var(--text); font-weight: 500 }
+.matched-terms { display: flex; flex-wrap: wrap; gap: 5px }
+.matched-term { color: var(--blue); background: rgba(62, 166, 255, .12); border-radius: 10px; padding: 2px 8px }
+.matched-fields { color: var(--text-2) }
+
+@media (max-width: 560px) {
+  .liked-search-panel { padding: 16px }
+  .liked-search-form { flex-wrap: wrap }
+  .liked-search-form input { flex-basis: 100% }
+}

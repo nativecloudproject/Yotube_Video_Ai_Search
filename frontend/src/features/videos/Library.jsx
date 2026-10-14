@@ -1,114 +1,132 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../api'
 import { useAuth } from '../../auth'
 import RequireLogin from '../../components/RequireLogin'
 import VideoCard from '../../components/VideoCard'
 import { Empty } from '../../components/ui'
-import { CATEGORY_NAMES, matchVideos } from '../recommend/match'
 
+const EXAMPLE_QUERIES = ['개발', '공부', '브이로그']
+const FIELD_LABELS = { title: '제목', description: '설명', channel: '채널' }
 
+function MatchEvidence({ item }) {
+  const fields = (item.matched_fields || []).map((field) => FIELD_LABELS[field] || field)
+  const terms = item.matched_terms || []
 
-// 구독 피드 · 시청 기록 · 내 동영상 · 좋아요 — 같은 화면, API 만 다르다
-// 그중 '좋아요 표시한 동영상'(kind === 'liked')에는 키워드·카테고리로 찾는 기능(AI 맞춤 추천)이 붙는다.
+  if (item.score == null && terms.length === 0 && fields.length === 0) return null
+
+  return (
+    <div className="search-evidence">
+      {item.score != null && <span className="similarity">유사도 {Math.round(item.score * 100)}%</span>}
+      {terms.length > 0 && <div className="matched-terms">{terms.map((term) => <span key={term} className="matched-term">#{term}</span>)}</div>}
+      {fields.length > 0 && <span className="matched-fields">{fields.join(' · ')}</span>}
+    </div>
+  )
+}
+
+// 구독 피드 · 시청 기록 · 내 동영상 · 좋아요 — 같은 화면, API 만 다르다.
 export default function Library({ kind, title, empty }) {
   const { me } = useAuth()
-  const [videos, setVideos] = useState(null)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [input, setInput] = useState('')
-  const [query, setQuery] = useState('')
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [retrySequence, setRetrySequence] = useState(0)
   const canSearch = kind === 'liked'
+  const query = canSearch ? (searchParams.get('q') || '') : ''
+
+  useEffect(() => {
+    if (canSearch) setInput(query)
+  }, [canSearch, query])
 
   useEffect(() => {
     if (!me) return
-    setVideos(null)
-    api.get(`/api/videos/${kind}`).then(setVideos).catch(() => setVideos([]))
-  }, [kind, me])
 
-  // 다른 페이지로 옮겨 가면 검색어 비우기
-  useEffect(() => {
-    setInput('')
-    setQuery('')
-  }, [kind])
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setData(null)
 
-  const rows = useMemo(() => {
-    if (!videos) return []
-    if (!canSearch || !query) return videos.map((video) => ({ video, matched: [] }))
-    return matchVideos(videos, query)
-  }, [videos, query, canSearch])
+    const url = canSearch
+      ? `/api/recommend/liked?q=${encodeURIComponent(query)}&limit=24`
+      : `/api/videos/${kind}`
 
-  // 카테고리마다 좋아요 영상이 몇 개 걸리는지 (칩 옆 숫자)
-  const counts = useMemo(
-    () => Object.fromEntries(CATEGORY_NAMES.map((n) => [n, videos ? matchVideos(videos, n).length : 0])),
-    [videos],
-  )
+    api.get(url).then((response) => {
+      if (cancelled) return
+      setData(canSearch ? response : { total: response.length, items: response })
+    }).catch((requestError) => {
+      if (cancelled) return
+      setError(requestError)
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
 
-  const search = (e) => {
-    e.preventDefault()
-    setQuery(input.trim())
+    return () => { cancelled = true }
+  }, [canSearch, kind, me, query, retrySequence])
+
+  const updateQuery = (next) => {
+    const params = new URLSearchParams(searchParams)
+    if (next) params.set('q', next)
+    else params.delete('q')
+    setSearchParams(params)
   }
 
-  const choose = (keyword) => {
-    // 이미 선택된 칩을 다시 누르면 해제 (전체 보기)
-    const next = query === keyword ? '' : keyword
-    setInput(next)
-    setQuery(next)
+  const search = (event) => {
+    event.preventDefault()
+    updateQuery(input.trim())
   }
+
+  const clearSearch = () => updateQuery('')
+  const retry = () => setRetrySequence((sequence) => sequence + 1)
+  const items = data?.items || []
 
   return (
     <RequireLogin>
-      <h1>{title}</h1>
+      <h1>{canSearch ? '좋아요 영상 스마트 검색' : title}</h1>
 
-      {canSearch && videos && videos.length > 0 && (
-        <div className="ai-panel">
-          <div className="ai-title">AI 맞춤 추천</div>
-          <p className="ai-sub">제목이 기억나지 않을 때, 키워드나 카테고리로 좋아요 영상을 찾아보세요.</p>
-
-          <form className="ai-form" onSubmit={search}>
+      {canSearch && (
+        <section className="liked-search-panel" aria-label="좋아요 영상 스마트 검색">
+          <p className="liked-search-description">좋아요를 누른 영상에서 제목, 설명, 채널을 기준으로 찾아보세요.</p>
+          <form className="liked-search-form" onSubmit={search}>
             <input
+              type="search"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="예: 먹방, 공부, 카페"
-              aria-label="좋아요 영상에서 찾을 키워드"
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="예: 파이썬, 공부, 브이로그"
+              aria-label="좋아요 영상 검색어"
             />
-            <button className="btn" type="submit">찾기</button>
+            <button className="btn" type="submit">검색</button>
+            {query && <button className="btn ghost clear-search" type="button" onClick={clearSearch} aria-label="검색 초기화">초기화</button>}
           </form>
-
-          <div className="ai-chips">
-            {CATEGORY_NAMES.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className={`chip ${query === name ? 'on' : ''} ${counts[name] === 0 ? 'zero' : ''}`}
-                onClick={() => choose(name)}
-              >
-                {name}
-                <span className="chip-n">{counts[name]}</span>
-              </button>
-            ))}
+          <div className="example-queries" aria-label="예시 검색어">
+            {EXAMPLE_QUERIES.map((example) => <button key={example} className="chip" type="button" onClick={() => updateQuery(example)}>{example}</button>)}
           </div>
-        </div>
+        </section>
       )}
 
-      {videos === null ? null : videos.length === 0 ? (
-        <Empty>{empty}</Empty>
-      ) : canSearch && query && rows.length === 0 ? (
-        <Empty>“{query}”와 관련된 좋아요 영상이 없습니다. 다른 키워드로 찾아보세요.</Empty>
-      ) : (
-        <>
-          {canSearch && query && <h2 style={{ margin: '8px 0 18px' }}>“{query}” 관련 영상 {rows.length}개</h2>}
-          <div className="vgrid">
-            {rows.map(({ video, matched }) => (
-              <div key={video.id}>
-                <VideoCard v={video} hideChannel={kind === 'mine'} />
-                {matched.length > 0 && (
-                  <div className="ai-tags">
-                    {matched.slice(0, 4).map((w) => <span key={w} className="ai-tag">#{w}</span>)}
-                  </div>
-                )}
-              </div>
-            ))}
+      <section className="library-status" aria-live="polite">
+        {loading ? <Empty>{canSearch ? '좋아요 영상을 불러오는 중입니다.' : '영상을 불러오는 중입니다.'}</Empty> : error ? (
+          <div className="search-error" role="alert">
+            <p>{canSearch ? '좋아요 영상을 불러오지 못했습니다.' : '영상을 불러오지 못했습니다.'}</p>
+            <button className="btn ghost retry-search" type="button" onClick={retry}>다시 시도</button>
           </div>
-        </>
-      )}
+        ) : data && items.length === 0 ? (
+          <Empty>{canSearch && query ? `“${query}”와 관련된 좋아요 영상이 없습니다. 다른 키워드로 찾아보세요.` : canSearch ? '아직 좋아요 표시한 동영상이 없습니다.' : empty}</Empty>
+        ) : data ? (
+          <>
+            {canSearch && query && <h2 className="search-result-count">“{query}” 관련 영상 {data.total}개</h2>}
+            <div className="vgrid">
+              {items.map((item) => (
+                <div key={item.id} className="liked-result-card">
+                  <VideoCard v={item} hideChannel={kind === 'mine'} />
+                  {canSearch && <MatchEvidence item={item} />}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </section>
     </RequireLogin>
   )
 }
