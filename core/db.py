@@ -22,8 +22,10 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data.db')
+DEFAULT_DB_PATH: str = str(Path(__file__).resolve().parents[1] / 'data.db')
+DB_PATH = str(Path(os.getenv('DATABASE', DEFAULT_DB_PATH)).expanduser().resolve())
 _lock = threading.RLock()
 _known = set()
 _conn_obj = None
@@ -45,6 +47,14 @@ def close():
         _conn_obj.close()
         _conn_obj = None
     _known.clear()
+
+
+def configure(path: str) -> None:
+    """Switch the document store to a resolved SQLite path for the next connection."""
+    global DB_PATH
+    with _lock:
+        close()
+        DB_PATH = str(Path(path).expanduser().resolve())
 
 
 def _ensure(table):
