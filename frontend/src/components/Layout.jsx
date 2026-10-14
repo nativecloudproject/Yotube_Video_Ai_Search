@@ -49,7 +49,7 @@ export default function Layout({ children }) {
           <button className="ibtn" onClick={() => setOpen((o) => !o)} aria-label="메뉴"><Ic.Menu /></button>
           <Link to="/" className="logo"><span className="logo-mark"><Ic.Play size={16} /></span>TubeLite<sup>KR</sup></Link>
         </div>
-        <form className="tb-search" onSubmit={search}>
+         <form className="tb-search" onSubmit={search}>
           <input name="q" placeholder="검색" defaultValue={sp.get('q') || ''} key={loc.search} />
           <button type="submit" aria-label="검색"><Ic.Search /></button>
         </form>
