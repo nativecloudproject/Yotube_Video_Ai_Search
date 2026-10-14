@@ -22,6 +22,7 @@ const rankedResponse = {
   ],
 }
 const EMPTY = { query: '', total: 0, items: [] }
+const NONEMPTY_CORPUS = { query: '', total: 1, items: [video] }
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -37,10 +38,11 @@ function HistoryControls() {
   return <><button type="button" onClick={() => navigate(-1)}>뒤로</button><button type="button" onClick={() => navigate(1)}>앞으로</button></>
 }
 
-function renderLibrary({ kind = 'liked', route = '/liked', entries, initialIndex, response = rankedResponse, fetchImpl } = {}) {
+function renderLibrary({ kind = 'liked', route = '/liked', entries, initialIndex, response = rankedResponse, corpusResponse = NONEMPTY_CORPUS, fetchImpl } = {}) {
   global.fetch = vi.fn(fetchImpl || ((url) => {
     if (url === '/api/auth/me') return Promise.resolve(json(me))
     if (url === '/api/notifications/') return Promise.resolve(json({ unread: 0 }))
+    if (url === '/api/recommend/liked?q=&limit=1') return Promise.resolve(json(corpusResponse))
     if (String(url).startsWith('/api/recommend/liked')) return Promise.resolve(json(response))
     if (url === `/api/videos/${kind}`) return Promise.resolve(json(Array.isArray(response) ? response : response.items))
     throw new Error(`Unexpected request: ${url}`)
@@ -63,10 +65,11 @@ function deferred() {
   return { promise, resolve }
 }
 
-function authenticated(fetchImpl) {
+function authenticated(fetchImpl, corpusResponse = NONEMPTY_CORPUS) {
   return (url, options) => {
     if (url === '/api/auth/me') return Promise.resolve(json(me))
     if (url === '/api/notifications/') return Promise.resolve(json({ unread: 0 }))
+    if (url === '/api/recommend/liked?q=&limit=1') return Promise.resolve(json(corpusResponse))
     return fetchImpl(url, options)
   }
 }
@@ -170,13 +173,12 @@ describe('liked smart search library', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=이전')
   })
 
-  test('offers a usable example action when no liked videos exist', async () => {
-    const user = userEvent.setup()
-    renderLibrary({ response: EMPTY })
+  test.each(['/liked', '/liked?q=개발'])('hides search and gives like-addition guidance for an empty corpus at %s', async (route) => {
+    renderLibrary({ route, response: { query: route.includes('?') ? '개발' : '', total: 0, items: [] }, corpusResponse: EMPTY })
 
-    expect(await screen.findByText('아직 좋아요 표시한 동영상이 없습니다.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '개발' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%EA%B0%9C%EB%B0%9C')
+    expect(await screen.findByText('아직 좋아요 표시한 동영상이 없습니다. 영상에서 좋아요를 누르면 여기에서 검색할 수 있습니다.')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '좋아요 영상 스마트 검색' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
   })
 
   test('offers a usable clear action when a query has no match', async () => {
@@ -184,6 +186,7 @@ describe('liked smart search library', () => {
     renderLibrary({ route: '/liked?q=천문학', response: { query: '천문학', total: 0, items: [] } })
 
     expect(await screen.findByText('“천문학”와 관련된 좋아요 영상이 없습니다. 다른 키워드로 찾아보세요.')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '좋아요 영상 스마트 검색' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '검색 초기화' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/liked')
   })

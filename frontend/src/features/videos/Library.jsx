@@ -30,6 +30,7 @@ export default function Library({ kind, title, empty }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [input, setInput] = useState('')
   const [data, setData] = useState(null)
+  const [hasLikedCorpus, setHasLikedCorpus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [retrySequence, setRetrySequence] = useState(0)
@@ -53,9 +54,15 @@ export default function Library({ kind, title, empty }) {
       ? `/api/recommend/liked?q=${encodeURIComponent(query)}&limit=24`
       : `/api/videos/${kind}`
 
-    api.get(url, { signal: controller.signal }).then((response) => {
+    const dataRequest = api.get(url, { signal: controller.signal })
+    const corpusRequest = canSearch
+      ? api.get('/api/recommend/liked?q=&limit=1', { signal: controller.signal })
+      : Promise.resolve(null)
+
+    Promise.all([dataRequest, corpusRequest]).then(([response, corpus]) => {
       if (cancelled) return
       setData(canSearch ? response : { total: response.length, items: response })
+      if (canSearch) setHasLikedCorpus(corpus.total > 0)
     }).catch((requestError) => {
       if (cancelled) return
       setError(requestError)
@@ -90,7 +97,7 @@ export default function Library({ kind, title, empty }) {
     <RequireLogin>
       <h1>{canSearch ? '좋아요 영상 스마트 검색' : title}</h1>
 
-      {canSearch && (
+      {canSearch && hasLikedCorpus && (
         <section className="liked-search-panel" aria-label="좋아요 영상 스마트 검색">
           <p className="liked-search-description">좋아요를 누른 영상에서 제목, 설명, 채널을 기준으로 찾아보세요.</p>
           <form className="liked-search-form" onSubmit={search}>
@@ -116,6 +123,8 @@ export default function Library({ kind, title, empty }) {
             <p>{canSearch ? '좋아요 영상을 불러오지 못했습니다.' : '영상을 불러오지 못했습니다.'}</p>
             <button className="btn ghost retry-search" type="button" onClick={retry}>다시 시도</button>
           </div>
+        ) : data && canSearch && hasLikedCorpus === false ? (
+          <Empty>아직 좋아요 표시한 동영상이 없습니다. 영상에서 좋아요를 누르면 여기에서 검색할 수 있습니다.</Empty>
         ) : data && items.length === 0 ? (
           <Empty>{canSearch && query ? `“${query}”와 관련된 좋아요 영상이 없습니다. 다른 키워드로 찾아보세요.` : canSearch ? '아직 좋아요 표시한 동영상이 없습니다.' : empty}</Empty>
         ) : data ? (

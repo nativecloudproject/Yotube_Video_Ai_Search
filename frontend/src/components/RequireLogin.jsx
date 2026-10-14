@@ -6,6 +6,6 @@ export default function RequireLogin({ children }) {
   const { me } = useAuth()
   const loc = useLocation()
   if (me === undefined) return null
-  if (!me) return <Navigate to="/login" state={{ from: loc.pathname }} replace />
+  if (!me) return <Navigate to="/login" state={{ from: `${loc.pathname}${loc.search}${loc.hash}` }} replace />
   return children
 }
