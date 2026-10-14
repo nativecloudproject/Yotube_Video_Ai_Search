@@ -1,7 +1,13 @@
-// import Recommend from './Recommend'
+import { Navigate, useLocation } from 'react-router-dom'
 
-// export default {
-//   order: 5,
-//   nav: [{ to: '/recommend', label: 'AI 맞춤 추천', icon: 'search', section: 'you' }],
-//   routes: [{ path: '/recommend', element: <Recommend /> }],
-// }
+export function LegacyRecommendRedirect() {
+  const location = useLocation()
+
+  return <Navigate replace to={{ pathname: '/liked', search: location.search }} />
+}
+
+export default {
+  order: 5,
+  nav: [],
+  routes: [{ path: '/recommend', element: <LegacyRecommendRedirect /> }],
+}
