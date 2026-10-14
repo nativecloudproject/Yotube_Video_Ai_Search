@@ -13,7 +13,8 @@ TubeLite는 사용자가 **TubeLite 내부에서 좋아요를 누른 영상만**
 ## 처음 설치하고 실행하기
 
 ```powershell
-py -3.11 -m venv .venv
+python --version  # Python 3.11 이상인지 확인
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
