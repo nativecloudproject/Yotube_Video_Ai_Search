@@ -66,6 +66,7 @@ export default function Library({ kind, title, empty }) {
   }, [canSearch, kind, me, query, retrySequence])
 
   const updateQuery = (next) => {
+    setInput(next)
     const params = new URLSearchParams(searchParams)
     if (next) params.set('q', next)
     else params.delete('q')

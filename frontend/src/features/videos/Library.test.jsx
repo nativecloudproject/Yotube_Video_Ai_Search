@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { AuthProvider } from '../../auth'
 import Library from './Library'
@@ -15,10 +15,13 @@ const video = {
   score: 0.64, matched_terms: ['파이썬'], matched_fields: ['title', 'description'],
 }
 
-const rankedResponse = { query: '파이썬', total: 2, items: [
-  video,
-  { ...video, id: 'second', title: '두 번째 서버 결과', score: 0.2, matched_terms: ['파이썬'], matched_fields: ['channel'] },
-] }
+const rankedResponse = {
+  query: '파이썬', total: 2, items: [
+    { ...video, id: 'server-first', title: '서버가 먼저 보낸 낮은 점수 결과', score: 0.2 },
+    { ...video, id: 'server-second', title: '서버가 두 번째로 보낸 높은 점수 결과', score: 0.93 },
+  ],
+}
+const EMPTY = { query: '', total: 0, items: [] }
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -27,6 +30,11 @@ function json(body, status = 200) {
 function Location() {
   const location = useLocation()
   return <output data-testid="location">{location.pathname}{location.search}</output>
+}
+
+function HistoryControls() {
+  const navigate = useNavigate()
+  return <><button type="button" onClick={() => navigate(-1)}>뒤로</button><button type="button" onClick={() => navigate(1)}>앞으로</button></>
 }
 
 function renderLibrary({ kind = 'liked', route = '/liked', response = rankedResponse, fetchImpl } = {}) {
@@ -39,10 +47,10 @@ function renderLibrary({ kind = 'liked', route = '/liked', response = rankedResp
   }))
 
   return render(
-    <MemoryRouter initialEntries={[route]}>
+    <MemoryRouter initialEntries={[route]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <Routes>
-          <Route path="*" element={<><Library kind={kind} title={kind === 'liked' ? '좋아요 표시한 동영상' : '시청 기록'} empty="비어 있습니다." /><Location /></>} />
+          <Route path="*" element={<><Library kind={kind} title={kind === 'liked' ? '좋아요 표시한 동영상' : '시청 기록'} empty="비어 있습니다." /><Location /><HistoryControls /></>} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -55,100 +63,219 @@ function deferred() {
   return { promise, resolve }
 }
 
+function authenticated(fetchImpl) {
+  return (url) => {
+    if (url === '/api/auth/me') return Promise.resolve(json(me))
+    if (url === '/api/notifications/') return Promise.resolve(json({ unread: 0 }))
+    return fetchImpl(url)
+  }
+}
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn())
 })
 
 describe('liked smart search library', () => {
-  test('restores q from the URL and renders server-ranked evidence', async () => {
+  test('restores q in the searchbox and preserves the server order despite inverted scores', async () => {
     renderLibrary({ route: '/liked?q=파이썬' })
 
-    expect(await screen.findByText('파이썬으로 30분 만에 나만의 게시판 만들기')).toBeInTheDocument()
-    expect(screen.getByText('유사도 64%')).toBeInTheDocument()
-    expect(screen.getAllByText('#파이썬')[0]).toBeInTheDocument()
-    expect(screen.getByText('제목 · 설명')).toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: /파이썬으로|두 번째 서버 결과/ }).map((link) => link.textContent)).toEqual([
-      '파이썬으로 30분 만에 나만의 게시판 만들기', '두 번째 서버 결과',
+    expect(await screen.findByText('서버가 먼저 보낸 낮은 점수 결과')).toBeInTheDocument()
+    expect(screen.getByRole('searchbox')).toHaveValue('파이썬')
+    expect(screen.getByText('유사도 20%')).toBeInTheDocument()
+    expect(screen.getAllByText('제목 · 설명')[0]).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /서버가 .* 결과/ }).map((link) => link.textContent)).toEqual([
+      '서버가 먼저 보낸 낮은 점수 결과', '서버가 두 번째로 보낸 높은 점수 결과',
     ])
   })
 
-  test('submitting and clearing search updates the real URL', async () => {
+  test('renders a response only for the exact encoded q and limit boundary', async () => {
+    const exactUrl = '/api/recommend/liked?q=%ED%8C%8C%EC%9D%B4%EC%8D%AC%20%26%20Flask&limit=24'
+    renderLibrary({ fetchImpl: authenticated((url) => {
+      if (url === '/api/recommend/liked?q=&limit=24') return Promise.resolve(json(EMPTY))
+      if (url === exactUrl) return Promise.resolve(json({ query: '파이썬 & Flask', total: 1, items: [{ ...video, title: '정확한 인코딩 경계 결과' }] }))
+      return Promise.resolve(json({ error: '잘못된 검색 경계' }, 400))
+    }) })
     const user = userEvent.setup()
-    renderLibrary({ route: '/liked' })
 
-    await user.type(await screen.findByRole('searchbox'), '개발')
+    await user.type(await screen.findByRole('searchbox'), '파이썬 & Flask')
     await user.click(screen.getByRole('button', { name: '검색' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%EA%B0%9C%EB%B0%9C')
+    expect(await screen.findByText('정확한 인코딩 경계 결과')).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%ED%8C%8C%EC%9D%B4%EC%8D%AC+%26+Flask')
+  })
 
+  test('resynchronizes the input after submitting an already-normalized query', async () => {
+    const user = userEvent.setup()
+    renderLibrary({ route: '/liked?q=개발' })
+    const input = await screen.findByRole('searchbox')
+
+    await user.clear(input)
+    await user.type(input, ' 개발 ')
+    await user.click(screen.getByRole('button', { name: '검색' }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%EA%B0%9C%EB%B0%9C')
+    expect(input).toHaveValue('개발')
+  })
+
+  test('clears whitespace-only input when the URL already has no q', async () => {
+    const user = userEvent.setup()
+    renderLibrary({ response: EMPTY })
+    const input = await screen.findByRole('searchbox')
+
+    await user.type(input, '   ')
+    await user.click(screen.getByRole('button', { name: '검색' }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked')
+    expect(input).toHaveValue('')
+  })
+
+  test('resynchronizes the input when the current example query is selected', async () => {
+    const user = userEvent.setup()
+    renderLibrary({ route: '/liked?q=개발' })
+    const input = await screen.findByRole('searchbox')
+
+    await user.clear(input)
+    await user.type(input, '편집 중인 검색어')
+    await user.click(screen.getByRole('button', { name: '개발' }))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%EA%B0%9C%EB%B0%9C')
+    expect(input).toHaveValue('개발')
+  })
+
+  test('offers a usable example action when no liked videos exist', async () => {
+    const user = userEvent.setup()
+    renderLibrary({ response: EMPTY })
+
+    expect(await screen.findByText('아직 좋아요 표시한 동영상이 없습니다.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '개발' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%EA%B0%9C%EB%B0%9C')
+  })
+
+  test('offers a usable clear action when a query has no match', async () => {
+    const user = userEvent.setup()
+    renderLibrary({ route: '/liked?q=천문학', response: { query: '천문학', total: 0, items: [] } })
+
+    expect(await screen.findByText('“천문학”와 관련된 좋아요 영상이 없습니다. 다른 키워드로 찾아보세요.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '검색 초기화' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/liked')
   })
 
-  test('shows a no-likes message when an empty query has no liked videos', async () => {
-    renderLibrary({ response: { query: '', total: 0, items: [] } })
-
-    expect(await screen.findByText('아직 좋아요 표시한 동영상이 없습니다.')).toBeInTheDocument()
-  })
-
-  test('shows a no-match message when a query has no matching liked videos', async () => {
-    renderLibrary({ route: '/liked?q=천문학', response: { query: '천문학', total: 0, items: [] } })
-
-    expect(await screen.findByText('“천문학”와 관련된 좋아요 영상이 없습니다. 다른 키워드로 찾아보세요.')).toBeInTheDocument()
-  })
-
-  test('shows a loading message until the liked search response arrives', async () => {
+  test('shows loading until the liked search response arrives', async () => {
     const pending = deferred()
-    renderLibrary({ fetchImpl: (url) => {
-      if (url === '/api/auth/me') return Promise.resolve(json(me))
-      if (url === '/api/notifications/') return Promise.resolve(json({ unread: 0 }))
-      if (String(url).startsWith('/api/recommend/liked')) return pending.promise
-      if (url === '/api/videos/liked') return pending.promise
+    renderLibrary({ fetchImpl: authenticated((url) => {
+      if (url === '/api/recommend/liked?q=&limit=24') return pending.promise
       throw new Error(`Unexpected request: ${url}`)
-    } })
+    }) })
 
     expect(await screen.findByText('좋아요 영상을 불러오는 중입니다.')).toBeInTheDocument()
-    pending.resolve(json(rankedResponse))
-    expect(await screen.findByText(video.title)).toBeInTheDocument()
+    await act(async () => { pending.resolve(json(rankedResponse)); await Promise.resolve() })
+    expect(await screen.findByText('서버가 먼저 보낸 낮은 점수 결과')).toBeInTheDocument()
   })
 
-  test('shows a retryable error when liked search fails', async () => {
-    renderLibrary({ fetchImpl: (url) => {
-      if (url === '/api/auth/me') return Promise.resolve(json(me))
-      if (url === '/api/notifications/') return Promise.resolve(json({ unread: 0 }))
-      if (String(url).startsWith('/api/recommend/liked')) return Promise.resolve(json({ error: '서버 오류' }, 500))
-      if (url === '/api/videos/liked') return Promise.resolve(json([]))
-      throw new Error(`Unexpected request: ${url}`)
-    } })
+  test('retries a failed liked search and renders the recovered response', async () => {
+    let failed = false
+    renderLibrary({ route: '/liked?q=개발', fetchImpl: authenticated((url) => {
+      if (url !== '/api/recommend/liked?q=%EA%B0%9C%EB%B0%9C&limit=24') return Promise.resolve(json({ error: '잘못된 검색 경계' }, 400))
+      if (!failed) { failed = true; return Promise.resolve(json({ error: '서버 오류' }, 500)) }
+      return Promise.resolve(json({ query: '개발', total: 1, items: [{ ...video, title: '재시도 후 복구된 결과' }] }))
+    }) })
+    const user = userEvent.setup()
 
     expect(await screen.findByText('좋아요 영상을 불러오지 못했습니다.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '다시 시도' }))
+    expect(await screen.findByText('재시도 후 복구된 결과')).toBeInTheDocument()
   })
 
-  test('ignores a stale response after the URL query changes', async () => {
+  test('keeps the newer result after a stale success finishes through React updates', async () => {
     const user = userEvent.setup()
     const first = deferred()
     const second = deferred()
-    renderLibrary({ fetchImpl: (url) => {
-      if (url === '/api/auth/me') return Promise.resolve(json(me))
-      if (url === '/api/notifications/') return Promise.resolve(json({ unread: 0 }))
-      if (String(url).includes('q=%EC%B2%AB')) return first.promise
-      if (String(url).includes('q=%EB%91%90')) return second.promise
-      if (String(url).startsWith('/api/recommend/liked')) return Promise.resolve(json({ query: '', total: 0, items: [] }))
-      if (url === '/api/videos/liked') return Promise.resolve(json([]))
+    renderLibrary({ fetchImpl: authenticated((url) => {
+      if (url === '/api/recommend/liked?q=&limit=24') return Promise.resolve(json(EMPTY))
+      if (url === '/api/recommend/liked?q=%EC%B2%AB&limit=24') return first.promise
+      if (url === '/api/recommend/liked?q=%EB%91%90&limit=24') return second.promise
       throw new Error(`Unexpected request: ${url}`)
-    } })
-
+    }) })
     const input = await screen.findByRole('searchbox')
+
     await user.type(input, '첫')
     await user.click(screen.getByRole('button', { name: '검색' }))
     await user.clear(input)
     await user.type(input, '두')
     await user.click(screen.getByRole('button', { name: '검색' }))
+    await act(async () => { second.resolve(json({ query: '두', total: 1, items: [{ ...video, id: 'new', title: '새 쿼리 결과' }] })); await Promise.resolve() })
+    expect(await screen.findByText('새 쿼리 결과')).toBeInTheDocument()
 
-    second.resolve(json({ query: '두', total: 1, items: [{ ...video, id: 'second-query', title: '두 번째 응답' }] }))
-    expect(await screen.findByText('두 번째 응답')).toBeInTheDocument()
-    first.resolve(json({ query: '첫', total: 1, items: [{ ...video, id: 'first-query', title: '첫 번째 오래된 응답' }] }))
-    expect(screen.queryByText('첫 번째 오래된 응답')).not.toBeInTheDocument()
+    await act(async () => { first.resolve(json({ query: '첫', total: 1, items: [{ ...video, id: 'old', title: '오래된 성공 응답' }] })); await Promise.resolve() })
+    await waitFor(() => {
+      expect(screen.getByText('새 쿼리 결과')).toBeInTheDocument()
+      expect(screen.queryByText('오래된 성공 응답')).not.toBeInTheDocument()
+    })
+  })
+
+  test('suppresses a stale server error after a newer result succeeds', async () => {
+    const user = userEvent.setup()
+    const first = deferred()
+    const second = deferred()
+    renderLibrary({ fetchImpl: authenticated((url) => {
+      if (url === '/api/recommend/liked?q=&limit=24') return Promise.resolve(json(EMPTY))
+      if (url === '/api/recommend/liked?q=%EC%B2%AB&limit=24') return first.promise
+      if (url === '/api/recommend/liked?q=%EB%91%90&limit=24') return second.promise
+      throw new Error(`Unexpected request: ${url}`)
+    }) })
+    const input = await screen.findByRole('searchbox')
+
+    await user.type(input, '첫')
+    await user.click(screen.getByRole('button', { name: '검색' }))
+    await user.clear(input)
+    await user.type(input, '두')
+    await user.click(screen.getByRole('button', { name: '검색' }))
+    await act(async () => { second.resolve(json({ query: '두', total: 1, items: [{ ...video, id: 'new', title: '새 쿼리 성공' }] })); await Promise.resolve() })
+    expect(await screen.findByText('새 쿼리 성공')).toBeInTheDocument()
+
+    await act(async () => { first.resolve(json({ error: '오래된 서버 오류' }, 500)); await Promise.resolve() })
+    await waitFor(() => {
+      expect(screen.getByText('새 쿼리 성공')).toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
+  test.each([
+    ['success', () => json(rankedResponse)],
+    ['server error', () => json({ error: '늦은 오류' }, 500)],
+  ])('does not update an unmounted pending request after %s', async (_case, makeResponse) => {
+    const pending = deferred()
+    const { container, unmount } = renderLibrary({ fetchImpl: authenticated((url) => {
+      if (url === '/api/recommend/liked?q=&limit=24') return pending.promise
+      throw new Error(`Unexpected request: ${url}`)
+    }) })
+
+    await screen.findByText('좋아요 영상을 불러오는 중입니다.')
+    unmount()
+    await act(async () => { pending.resolve(makeResponse()); await Promise.resolve() })
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  test('restores input, URL, and result through real router back and forward navigation', async () => {
+    const development = { query: '개발', total: 1, items: [{ ...video, id: 'development', title: '개발 결과' }] }
+    const study = { query: '공부', total: 1, items: [{ ...video, id: 'study', title: '공부 결과' }] }
+    const user = userEvent.setup()
+    renderLibrary({ route: '/liked?q=개발', fetchImpl: authenticated((url) => {
+      if (url === '/api/recommend/liked?q=%EA%B0%9C%EB%B0%9C&limit=24') return Promise.resolve(json(development))
+      if (url === '/api/recommend/liked?q=%EA%B3%B5%EB%B6%80&limit=24') return Promise.resolve(json(study))
+      throw new Error(`Unexpected request: ${url}`)
+    }) })
+
+    expect(await screen.findByText('개발 결과')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '공부' }))
+    expect(await screen.findByText('공부 결과')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '뒤로' }))
+    expect(await screen.findByText('개발 결과')).toBeInTheDocument()
+    expect(screen.getByRole('searchbox')).toHaveValue('개발')
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=개발')
+    await user.click(screen.getByRole('button', { name: '앞으로' }))
+    expect(await screen.findByText('공부 결과')).toBeInTheDocument()
+    expect(screen.getByRole('searchbox')).toHaveValue('공부')
+    expect(screen.getByTestId('location')).toHaveTextContent('/liked?q=%EA%B3%B5%EB%B6%80')
   })
 
   test('keeps non-liked library endpoints working', async () => {
