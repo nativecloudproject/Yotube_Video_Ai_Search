@@ -21,6 +21,7 @@ _FIELDS = (
     ("description", "desc", DESCRIPTION_WEIGHT),
     ("channel", "uploader_name", CHANNEL_WEIGHT),
 )
+_TOTAL_FIELD_WEIGHT = sum(weight for _, _, weight in _FIELDS)
 
 
 @dataclass(frozen=True)
@@ -42,14 +43,13 @@ def _tokens(words: tuple[str, ...]) -> Counter[str]:
     return Counter(tokens)
 
 
-def _weighted_document(video: dict) -> tuple[Counter[str], dict[str, Counter[str]]]:
+def _document_fields(video: dict) -> tuple[Counter[str], dict[str, Counter[str]]]:
     document: Counter[str] = Counter()
     fields: dict[str, Counter[str]] = {}
-    for field_name, key, weight in _FIELDS:
+    for field_name, key, _ in _FIELDS:
         field_tokens = _tokens(_normalized_words(video.get(key, "")))
         fields[field_name] = field_tokens
-        for token, count in field_tokens.items():
-            document[token] += count * weight
+        document.update(field_tokens)
     return document, fields
 
 
@@ -122,14 +122,18 @@ def rank_videos(
         return newest[:limit], len(newest)
 
     query_tokens = _tokens(query_words)
-    documents_and_fields = [_weighted_document(video) for video in videos]
+    documents_and_fields = [_document_fields(video) for video in videos]
     documents = [document for document, _ in documents_and_fields]
     idf = _idf(documents, query_tokens)
     query_vector = _vector(query_tokens, idf)
 
     ranked: list[RankedVideo] = []
     for video, (document, fields) in zip(videos, documents_and_fields):
-        score = round(min(1.0, max(0.0, _cosine(query_vector, _vector(document, idf)))), 4)
+        weighted_similarity = sum(
+            weight * _cosine(query_vector, _vector(fields[field_name], idf))
+            for field_name, _, weight in _FIELDS
+        )
+        score = round(min(1.0, max(0.0, weighted_similarity / _TOTAL_FIELD_WEIGHT)), 4)
         if score == 0.0:
             continue
         matched_fields = tuple(

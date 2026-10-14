@@ -7,21 +7,21 @@ weighted_field_videos = [
     {
         "id": "title",
         "title": "파이썬",
-        "desc": "일상 기록",
-        "uploader_name": "알파",
+        "desc": "",
+        "uploader_name": "",
         "created_at": "2026-01-01T00:00:00+00:00",
     },
     {
         "id": "description",
-        "title": "일상 기록",
+        "title": "",
         "desc": "파이썬",
-        "uploader_name": "베타",
+        "uploader_name": "",
         "created_at": "2026-01-02T00:00:00+00:00",
     },
     {
         "id": "channel",
-        "title": "일상 기록",
-        "desc": "소개",
+        "title": "",
+        "desc": "",
         "uploader_name": "파이썬",
         "created_at": "2026-01-03T00:00:00+00:00",
     },
@@ -117,12 +117,56 @@ matching_videos = [
     },
 ]
 
+numeric_contract_videos = [
+    {
+        "id": "exact-title",
+        "title": "abc",
+        "desc": "",
+        "uploader_name": "",
+        "created_at": "2026-01-01T00:00:00+00:00",
+    },
+    {
+        "id": "bigram-description",
+        "title": "",
+        "desc": "zabz",
+        "uploader_name": "",
+        "created_at": "2026-01-03T00:00:00+00:00",
+    },
+    {
+        "id": "bigram-channel",
+        "title": "",
+        "desc": "",
+        "uploader_name": "xbcx",
+        "created_at": "2026-01-02T00:00:00+00:00",
+    },
+]
+
 
 def test_title_match_ranks_above_description_then_channel():
     ranked, total = rank_videos(weighted_field_videos, "파이썬")
 
-    assert [row.video["id"] for row in ranked] == ["title", "description", "channel"]
-    assert ranked[0].matched_fields == ("title",)
+    assert [
+        (row.video["id"], row.score, row.matched_terms, row.matched_fields)
+        for row in ranked
+    ] == [
+        ("title", 0.5455, ("파이썬",), ("title",)),
+        ("description", 0.2727, ("파이썬",), ("description",)),
+        ("channel", 0.1818, ("파이썬",), ("channel",)),
+    ]
+    assert total == 3
+
+
+def test_weighted_tfidf_numeric_contract_includes_bigram_only_overlap():
+    ranked, total = rank_videos(numeric_contract_videos, "abc")
+
+    assert [
+        (row.video["id"], row.score, row.matched_terms, row.matched_fields)
+        for row in ranked
+    ] == [
+        ("exact-title", 0.5455, ("abc",), ("title",)),
+        ("bigram-description", 0.0568, ("abc",), ("description",)),
+        ("bigram-channel", 0.0379, ("abc",), ("channel",)),
+    ]
     assert total == 3
 
 
