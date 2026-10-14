@@ -1,82 +1,55 @@
-"""키워드 기반 유사 영상 추천. (core 만 사용 · 외부 AI 라이브러리 없음)
+"""Authenticated search across a user's liked videos."""
 
-GET /api/recommend/?q=클라우드
-  → 입력 키워드와 제목·설명·채널명이 의미상 비슷한 영상을 유사도 순으로 반환
-  → 각 항목에 score(0~1), reason(검색 키워드) 포함
-
-방법: 키워드와 영상 텍스트를 단어 + 글자 2-gram TF-IDF 벡터로 변환한 뒤
-      코사인 유사도를 계산한다. q가 비어 있으면 인기순으로 대신한다.
-"""
-import math
 import re
-from collections import Counter
+import unicodedata
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 
 from core import db
 from core.auth import login_required
-from features.videos.api import _sorted, view
-
-bp = Blueprint('recommend', __name__)
-LIMIT = 12
+from features.recommend.search import rank_videos
+from features.videos.api import view
 
 
-def tokens_text(text: str) -> Counter:
-    """한국어/영어 텍스트를 단어 + 글자 2-gram 토큰으로 만든다."""
-    words = re.findall(r'[0-9a-z가-힣]+', (text or '').lower())
-    grams = [w[i:i + 2] for w in words for i in range(len(w) - 1)]
-    return Counter(words + grams)
+bp = Blueprint("recommend", __name__)
+MAX_QUERY_LENGTH = 100
+DEFAULT_LIMIT = 24
+MAX_LIMIT = 50
+_LIMIT_RE = re.compile(r"^[0-9]+$")
 
 
-def video_text(v: dict) -> str:
-    # 제목을 두 번 넣어 제목 일치를 조금 더 중요하게 본다.
-    return ' '.join([
-        v.get('title', '') * 2,
-        v.get('desc', ''),
-        v.get('uploader_name', ''),
-    ])
-
-
-def vectorize(query: str, videos: list[dict]):
-    """검색 키워드와 모든 영상을 같은 TF-IDF 공간으로 벡터화한다."""
-    docs = {'__query__': tokens_text(query)}
-    docs.update({v['id']: tokens_text(video_text(v)) for v in videos})
-
-    df = Counter(t for d in docs.values() for t in d)
-    n = len(docs)
-    idf = {t: math.log((1 + n) / (1 + c)) + 1 for t, c in df.items()}
-
-    return {
-        doc_id: {t: count * idf[t] for t, count in tokens.items()}
-        for doc_id, tokens in docs.items()
-    }
-
-
-def cosine(a: dict, b: dict) -> float:
-    dot = sum(weight * b.get(token, 0) for token, weight in a.items())
-    na = math.sqrt(sum(weight * weight for weight in a.values()))
-    nb = math.sqrt(sum(weight * weight for weight in b.values()))
-    return dot / (na * nb) if na and nb else 0.0
-
-
-def recommend(query: str, videos: list[dict]):
-    query = (query or '').strip()
-    if not query:
-        return [(v, 0.0) for v in _sorted(videos, 'popular')[:LIMIT]]
-
-    vec = vectorize(query, videos)
-    qvec = vec['__query__']
-
-    scored = [(v, cosine(qvec, vec[v['id']])) for v in videos]
-    scored.sort(key=lambda item: (item[1], item[0].get('views', 0)), reverse=True)
-    return scored[:LIMIT]
-
-
-@bp.get('/')
+@bp.get("/liked")
 @login_required
-def index():
-    query = (request.args.get('q') or '').strip()
-    return jsonify([
-        {**view(v), 'score': round(score, 3), 'reason': query}
-        for v, score in recommend(query, db.all('videos'))
-    ])
+def liked():
+    query = unicodedata.normalize("NFKC", request.args.get("q", "")).strip()
+    if len(query) > MAX_QUERY_LENGTH:
+        return jsonify(error="검색어는 100자 이하여야 합니다."), 400
+
+    raw_limit = request.args.get("limit")
+    if raw_limit is None:
+        limit = DEFAULT_LIMIT
+    elif not _LIMIT_RE.fullmatch(raw_limit):
+        return jsonify(error="limit은 1부터 50 사이의 정수여야 합니다."), 400
+    else:
+        limit = int(raw_limit)
+        if not 1 <= limit <= MAX_LIMIT:
+            return jsonify(error="limit은 1부터 50 사이의 정수여야 합니다."), 400
+
+    user_id = session["user_id"]
+    candidates = [
+        video for video in db.all("videos") if user_id in video.get("likes", [])
+    ]
+    ranked, total = rank_videos(candidates, query, limit)
+    return jsonify(
+        query=query,
+        total=total,
+        items=[
+            {
+                **view(row.video),
+                "score": row.score,
+                "matched_terms": list(row.matched_terms),
+                "matched_fields": list(row.matched_fields),
+            }
+            for row in ranked
+        ],
+    )
