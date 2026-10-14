@@ -9,4 +9,5 @@ __pycache__/
 .venv/
 venv/
 frontend/node_modules/
+.worktrees/
 # static/app 은 빌드 결과물이지만 Python 만으로 실행할 수 있게 저장소에 포함한다
