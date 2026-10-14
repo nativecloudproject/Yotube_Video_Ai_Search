@@ -31,7 +31,10 @@ def liked():
     elif not _LIMIT_RE.fullmatch(raw_limit):
         return jsonify(error="limit은 1부터 50 사이의 정수여야 합니다."), 400
     else:
-        limit = int(raw_limit)
+        significant_digits = raw_limit.lstrip("0") or "0"
+        if len(significant_digits) > 2:
+            return jsonify(error="limit은 1부터 50 사이의 정수여야 합니다."), 400
+        limit = int(significant_digits)
         if not 1 <= limit <= MAX_LIMIT:
             return jsonify(error="limit은 1부터 50 사이의 정수여야 합니다."), 400
 
