@@ -44,6 +44,7 @@ export default function Library({ kind, title, empty }) {
     if (!me) return
 
     let cancelled = false
+    const controller = new AbortController()
     setLoading(true)
     setError(null)
     setData(null)
@@ -52,7 +53,7 @@ export default function Library({ kind, title, empty }) {
       ? `/api/recommend/liked?q=${encodeURIComponent(query)}&limit=24`
       : `/api/videos/${kind}`
 
-    api.get(url).then((response) => {
+    api.get(url, { signal: controller.signal }).then((response) => {
       if (cancelled) return
       setData(canSearch ? response : { total: response.length, items: response })
     }).catch((requestError) => {
@@ -62,7 +63,10 @@ export default function Library({ kind, title, empty }) {
       if (!cancelled) setLoading(false)
     })
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [canSearch, kind, me, query, retrySequence])
 
   const updateQuery = (next) => {
@@ -70,7 +74,7 @@ export default function Library({ kind, title, empty }) {
     const params = new URLSearchParams(searchParams)
     if (next) params.set('q', next)
     else params.delete('q')
-    setSearchParams(params)
+    if (params.toString() !== searchParams.toString()) setSearchParams(params)
   }
 
   const search = (event) => {

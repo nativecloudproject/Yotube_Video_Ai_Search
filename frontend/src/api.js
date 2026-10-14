@@ -1,6 +1,6 @@
 // 서버와 이야기하는 유일한 통로. 실패하면 서버가 준 메시지로 Error 를 던진다.
-async function request(method, url, body) {
-  const opts = { method, headers: {}, credentials: 'same-origin' }
+async function request(method, url, body, options = {}) {
+  const opts = { method, credentials: 'same-origin', ...options, headers: { ...options.headers } }
   if (body instanceof FormData) opts.body = body
   else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json'
@@ -19,7 +19,7 @@ async function request(method, url, body) {
 }
 
 export const api = {
-  get: (url) => request('GET', url),
+  get: (url, options) => request('GET', url, undefined, options),
   post: (url, body) => request('POST', url, body),
 }
 
